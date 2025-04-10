@@ -44,9 +44,6 @@ void Sim7x00::begin(int baudRate, int rxPin, int txPin) {
 void Sim7x00::PowerOn(int PowerKey){
    uint8_t answer = 0;
 
-  // CHANGED: Serial to Serial2
-  // Serial2 should be initialized with begin() method before calling PowerOn
-  
   // checks if the module is started
   answer = sendATcommand("AT", "OK", 2000);
   if (answer == 0)
@@ -70,6 +67,10 @@ void Sim7x00::PowerOn(int PowerKey){
 
   while ((sendATcommand("AT+CREG?", "+CREG: 0,1", 500) || sendATcommand("AT+CREG?", "+CREG: 0,5", 500)) == 0)
     delay(500);
+
+  if (!sendATcommand("AT+CSCLK=1", "OK", 1000)) {
+    Serial.println("Failed to set clock");
+  }
 }
 
 /**************************Phone Calls**************************/

@@ -1,48 +1,69 @@
 #include "Waveshare_SIM7600.h"
 #include <esp_sleep.h> 
+#include <chrono>
 
-#define uS_TO_S_FACTOR 1000000 
-#define TIME_TO_SLEEP  10 // in seconds
+#define POWERKEY      2
+#define SLEEPKEY      4
+#define TIME_TO_SLEEP 10
 
-int POWERKEY = 2;
-char phone_number[] = "+6594305337";
-unsigned long startTime;
+using namespace std::chrono;
 
 void setup() {
   Serial.begin(115200);
+  delay(500);
   
-  startTime = millis();
+  pinMode(POWERKEY, OUTPUT);
+  pinMode(SLEEPKEY, OUTPUT);
   
+  high_resolution_clock::time_point start_time = high_resolution_clock::now();
+  
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+  
+  if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.println("Wake up");
+  } else {
+    Serial.println("First boot");
+  }
+
+  // Set DTR high to keep UART active
+  digitalWrite(SLEEPKEY, HIGH);
+
   sim7600.begin(115200, 16, 17);
   sim7600.PowerOn(POWERKEY);
-  sim7600.ClearSMS();
-
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-
-  Serial.println("test_pcycle_gps_http_post");
-
-  Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) + " Seconds");
-}
-
-void loop() {
-  char message[50] = {0};
+  
+  const char* url = "https://sheepdog-intent-kindly.ngrok-free.app/http/ping";
+  char phone_number[] = "+6594305337";
+  char response[1024];
+  char message[200] = {0};
   float lat, log;
-
   if (sim7600.GetGPS(POWERKEY, &lat, &log)) {
-    sprintf(message, "{\"latitude\":%.6f,\"longitude\":%.6f,\"contact_number\":\"%s\"}", lat, log, phone_number);
-    if (sim7600.HTTPPost(testURL, message, response, sizeof(response))) {
+    high_resolution_clock::time_point gps_time = high_resolution_clock::now();
+    duration<double> gps_fix_time = gps_time - start_time;
+    snprintf(message, sizeof(message), "{\"latitude\":%.6f,\"longitude\":%.6f,\"contact_number\":\"%s\",\"gps_fix_time\":\"%f\"}", lat, log, phone_number, gps_fix_time.count());
+    if (sim7600.HTTPPost(url, message, response, sizeof(response))) {
       Serial.println(response);
     } else {
       Serial.println("Failed to send HTTP POST");
     }
   }
 
-  unsigned long dutyCycleDuration = millis() - startTime;
-  Serial.print("Duty cycle duration: ");
-  Serial.print(dutyCycleDuration);
-  Serial.println(" ms");
+  high_resolution_clock::time_point end_time = high_resolution_clock::now();
+
+  duration<double> time_elapsed = end_time - start_time;
+  Serial.print("Duty cycle: ");
+  Serial.print(time_elapsed.count());
+  Serial.println("s");
   
-  Serial.println("Going to sleep now");
-  delay(1000);
-  esp_deep_sleep_start(); 
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * 1000000);
+  
+  digitalWrite(SLEEPKEY, LOW);
+  Serial.println("Sleep");
+  Serial.flush(); 
+  delay(500); 
+  
+  esp_deep_sleep_start();
+}
+
+void loop() {
+  // Empty as we're using deep sleep
 }

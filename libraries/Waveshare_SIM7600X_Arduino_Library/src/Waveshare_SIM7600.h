@@ -28,8 +28,9 @@ public:
     void UploadToFTP(const char* FileName);
     void DownloadFromFTP(const char* FileName);
     bool HTTPGet(const char* url, char* response, int responseSize);
-    bool GetGPS();
-    bool GetGPS(float* Lat, float* Log);
+    bool HTTPPost(const char* url, const char* jsonBody, char* response, int responseSize);
+    bool GetGPS(int PowerKey);
+    bool GetGPS(int PowerKey, float* Lat, float* Log);
     bool GetGPSStub(float* Lat, float* Log);
     uint8_t sendATcommand(const char* ATcommand, const char* expected_answer, unsigned int timeout);
     char sendATcommand2(const char* ATcommand, const char* expected_answer1, const char* expected_answer2, unsigned int timeout);

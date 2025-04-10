@@ -19,7 +19,7 @@ void setup() {
 
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
 
-  Serial.println("test_pcycle_gps_sms_send");
+  Serial.println("test_pcycle_gps_http_post");
 
   Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) + " Seconds");
 }
@@ -29,12 +29,12 @@ void loop() {
   float lat, log;
 
   if (sim7600.GetGPS(POWERKEY, &lat, &log)) {
-    sprintf(message, "%.6f,%.6f", lat, log);
-    sim7600.SendSMS(phone_number, message);
-    Serial.print("Sent SMS with coordinates: ");
-    Serial.println(message);
-  } else {
-    Serial.println("Failed to get GPS coordinates");
+    sprintf(message, "{\"latitude\":%.6f,\"longitude\":%.6f,\"contact_number\":\"%s\"}", lat, log, phone_number);
+    if (sim7600.HTTPPost(testURL, message, response, sizeof(response))) {
+      Serial.println(response);
+    } else {
+      Serial.println("Failed to send HTTP POST");
+    }
   }
 
   unsigned long dutyCycleDuration = millis() - startTime;

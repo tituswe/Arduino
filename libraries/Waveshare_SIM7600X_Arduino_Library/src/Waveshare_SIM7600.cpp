@@ -282,99 +282,105 @@ void Sim7x00::DownloadFromFTP(const char* FileName){
 
 /**************************HTTP GET request**************************/
 bool Sim7x00::HTTPGet(const char* url, char* response, int responseSize) {
+    if (!sendATcommand("AT+HTTPINIT", "OK", 1000)) {
+        Serial.println("Failed to initialize HTTP session");
+        return false;
+    }
+
     char commandBuffer[100];
-    uint8_t answer = 0;
-    int i = 0;
-    int httpStatus = 0;
-
-    sendATcommand("AT+HTTPINIT", "OK", 1000);
-    
     sprintf(commandBuffer, "AT+HTTPPARA=\"URL\",\"%s\"", url);
-    sendATcommand(commandBuffer, "OK", 2000);
+    if (!sendATcommand(commandBuffer, "OK", 2000)) {
+        Serial.println("Failed to set HTTP parameters");
+        sendATcommand("AT+HTTPTERM", "OK", 2000);
+        return false;
+    }
 
-    // Send HTTP GET request
-    sendATcommand("AT+HTTPACTION=0", "OK", 5000);
-    
-    // Wait for +HTTPACTION response (important!)
-    Serial.println("Waiting for HTTP response...");
-    char httpAction[50] = {0};
-    unsigned long start = millis();
-    bool gotResponse = false;
-    
-    // Wait up to 30 seconds for the +HTTPACTION response
-    while (millis() - start < 30000 && !gotResponse) {
-        i = 0;
-        while (Serial2.available() && i < sizeof(httpAction)-1) {
-            httpAction[i] = Serial2.read();
-            i++;
-            httpAction[i] = '\0';
-            
-            // Check if we got the HTTPACTION response
-            if (strstr(httpAction, "+HTTPACTION: 0,")) {
-                gotResponse = true;
-                // Parse status code
-                char* statusPtr = strstr(httpAction, "+HTTPACTION: 0,") + 15;
-                httpStatus = atoi(statusPtr);
-                Serial.print("HTTP Status: ");
-                Serial.println(httpStatus);
-                break;
-            }
-        }
-        delay(100);
-    }
-    
-    if (!gotResponse) {
-        Serial.println("Failed to get HTTP action response");
+    if (!sendATcommand("AT+HTTPACTION=0", "+HTTPACTION: 0,", 5000)) {
+        Serial.println("Failed to send HTTP GET request");
         sendATcommand("AT+HTTPTERM", "OK", 2000);
         return false;
     }
-    
-    // Check if HTTP request was successful
-    if (httpStatus != 200) {
-        Serial.print("HTTP request failed with status: ");
-        Serial.println(httpStatus);
-        sendATcommand("AT+HTTPTERM", "OK", 2000);
-        return false;
-    }
-    
-    // Wait a bit before reading
-    delay(1000);
-    
-    // Now read the HTTP response
-    if (sendATcommand("AT+HTTPREAD=0,10000", "+HTTPREAD:", 10000)) {
-        i = 0;
+
+    if (sendATcommand("AT+HTTPREAD=0,10000", "+HTTPREAD: ", 10000)) {
+        int i = 0;
         unsigned long timeout = millis() + 5000;
-        
-        // First, read and discard the header line that contains content length
-        while (Serial2.available() && millis() < timeout) {
-            char c = Serial2.read();
-            if (c == '\n') break; // Skip until first newline
-        }
-        
-        // Now read actual content
         while (millis() < timeout && i < responseSize - 1) {
             if (Serial2.available()) {
                 char c = Serial2.read();
                 response[i++] = c;
             }
         }
-        
         response[i] = '\0';
-        Serial.println("HTTP GET response received");
-    } else {
-        Serial.println("Failed to read HTTP response");
+    }
+
+    if (!sendATcommand("AT+HTTPTERM", "OK", 2000)) {
+        Serial.println("Failed to terminate HTTP session");
+        return false;
+    }
+
+    return true;
+}
+
+/**************************HTTP POST request**************************/
+bool Sim7x00::HTTPPost(const char* url, const char* jsonBody, char* response, int responseSize) {
+    if (!sendATcommand("AT+HTTPINIT", "OK", 1000)) {
+        Serial.println("Failed to initialize HTTP session");
+        return false;
+    }
+
+    char commandBuffer[100];
+    sprintf(commandBuffer, "AT+HTTPPARA=\"URL\",\"%s\"", url);
+    if (!sendATcommand(commandBuffer, "OK", 2000)) {
+        Serial.println("Failed to set HTTP parameters");
         sendATcommand("AT+HTTPTERM", "OK", 2000);
         return false;
     }
 
-    // Terminate HTTP session
-    sendATcommand("AT+HTTPTERM", "OK", 2000);
+    if (!sendATcommand("AT+HTTPPARA=\"CONTENT\",\"application/json\"", "OK", 2000)) {
+        Serial.println("Failed to set content type");
+        sendATcommand("AT+HTTPTERM", "OK", 2000);
+        return false;
+    }
+
+    int bodyLength = strlen(jsonBody);
+    sprintf(commandBuffer, "AT+HTTPDATA=%d,%d", bodyLength, 10000);
+    if (!sendATcommand(commandBuffer, "DOWNLOAD", 2000)) {
+        Serial.println("Failed to set HTTP data length");
+        sendATcommand("AT+HTTPTERM", "OK", 2000);
+        return false;
+    }
+
+    Serial2.print(jsonBody);
+    Serial2.println();
+
+    if (!sendATcommand("AT+HTTPACTION=1", "+HTTPACTION: 1,", 5000)) {
+        Serial.println("Failed to send HTTP POST request");
+        sendATcommand("AT+HTTPTERM", "OK", 2000);
+        return false;
+    }
+
+    if (sendATcommand("AT+HTTPREAD=0,10000", "+HTTPREAD: ", 10000)) {
+        int i = 0;
+        unsigned long timeout = millis() + 5000;
+        while (millis() < timeout && i < responseSize - 1) {
+            if (Serial2.available()) {
+                char c = Serial2.read();
+                response[i++] = c;
+            }
+        }
+        response[i] = '\0';
+    }
+
+    if (!sendATcommand("AT+HTTPTERM", "OK", 2000)) {
+        Serial.println("Failed to terminate HTTP session");
+        return false;
+    }
+
     return true;
 }
 
-
 /**************************GPS positoning**************************/
-bool Sim7x00::GetGPS(){
+bool Sim7x00::GetGPS(int PowerKey){
 
     uint8_t answer = 0;
     bool RecNull = true;
@@ -391,16 +397,17 @@ bool Sim7x00::GetGPS(){
     float Log = 0;
 
     Serial.print("Start GPS session...\n");  // Keep Serial for debug output
-    sendATcommand("AT+CGPS=1,1", "OK", 1000);    // start GPS session, standalone mode
+    sendATcommand("AT+CGPS=1,2", "OK", 1000);    // start GPS session, standalone mode
 
     delay(2000);
 
     while(RecNull)
     {
+        pinMode(PowerKey, OUTPUT);
+        digitalWrite(PowerKey, HIGH);
         answer = sendATcommand("AT+CGPSINFO", "+CGPSINFO: ", 1000);    // start GPS session, standalone mode
 
-        if (answer == 1)
-        {
+        if (answer == 1) {
             answer = 0;
             // CHANGED: Serial to Serial2
             while(Serial2.available() == 0);
@@ -434,14 +441,13 @@ bool Sim7x00::GetGPS(){
                 RecNull = false;
                 sendATcommand("AT+CGPS=0", "OK:", 1000);
             }
-        }
-        else
-        {
+        } else {
             Serial.print("error \n");  // Keep Serial for debug output
+            digitalWrite(PowerKey, LOW);
             return false;
         }
+        digitalWrite(PowerKey, LOW);
         delay(2000);
-
     }
 
     // Rest of the GPS parsing code remains the same
@@ -504,7 +510,7 @@ bool Sim7x00::GetGPS(){
     return true;
 }
 
-bool Sim7x00::GetGPS(float* Lat, float* Log){
+bool Sim7x00::GetGPS(int PowerKey, float* Lat, float* Log){
 
     uint8_t answer = 0;
     bool RecNull = true;
@@ -519,12 +525,14 @@ bool Sim7x00::GetGPS(float* Lat, float* Log){
     int DayMonthYear;
 
     Serial.print("Start GPS session...\n");  // Keep Serial for debug output
-    sendATcommand("AT+CGPS=1,1", "OK", 1000);    // start GPS session, standalone mode
+    sendATcommand("AT+CGPS=1", "OK", 1000);    // start GPS session, standalone mode
 
     delay(2000);
 
     while(RecNull)
     {
+        pinMode(PowerKey, OUTPUT);
+        digitalWrite(PowerKey, HIGH);
         answer = sendATcommand("AT+CGPSINFO", "+CGPSINFO: ", 1000);    // start GPS session, standalone mode
 
         if (answer == 1)
@@ -566,8 +574,10 @@ bool Sim7x00::GetGPS(float* Lat, float* Log){
         else
         {
             Serial.print("error \n");  // Keep Serial for debug output
+            digitalWrite(PowerKey, LOW);
             return false;
         }
+        digitalWrite(PowerKey, LOW);
         delay(2000);
 
     }

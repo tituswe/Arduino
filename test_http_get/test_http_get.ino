@@ -2,7 +2,7 @@
 
 int POWERKEY = 2;
 char response[1024];
-const char* testURL = "http://httpbin.org/get";
+const char* testURL = "https://sheepdog-intent-kindly.ngrok-free.app";
 
 void setup() {
 	Serial.begin(115200);
@@ -24,3 +24,4 @@ void loop() {
 
   delay(5000);
 }
+
